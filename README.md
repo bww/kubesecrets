@@ -2,7 +2,7 @@
 
 Kubesecrets will read an input Helm values YAML file, traverse its values, transform them, and write the transformed output to a different file.
 
-Currently the only supported transformation is encoding scalar values (`bool`, `int`, `float`, `string`) in base64. This allows you to manage your secrets in plain text and easily encode them as Kubernetes expects.
+Currently the only supported transformation is encoding leaf / scalar values (`bool`, `int`, `float`, `string`) in base64. Non-string types are first stringified before they are encoded. This allows you to manage your secrets in plain text and easily encode them as Kubernetes expects.
 
 The output file is named the same as the input file with the extension `.enc.yaml` instead of `.yaml`.
 
