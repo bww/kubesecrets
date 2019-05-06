@@ -4,12 +4,15 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"reflect"
 
-	"gopkg.in/yaml.v2"
+	yaml "gopkg.in/yaml.v2"
 )
+
+type transformer func(string) (string, error)
 
 func main() {
 	app := path.Base(os.Args[0])
@@ -20,7 +23,9 @@ func main() {
 	var err error
 	switch cmd := os.Args[1]; cmd {
 	case "enc":
-		err = encode(app, cmd, os.Args[2:])
+		err = runCmd(app, cmd, os.Args[2:], base64enc, os.Stdout)
+	case "dec":
+		err = runCmd(app, cmd, os.Args[2:], base64dec, os.Stdout)
 	default:
 		fmt.Println("*** Invalid command:", cmd)
 	}
@@ -30,74 +35,87 @@ func main() {
 	}
 }
 
-func encode(app, cmd string, args []string) error {
+func runCmd(app, cmd string, args []string, xform transformer, dst io.Writer) error {
 	cmdline := flag.NewFlagSet(app, flag.ExitOnError)
 	fVerbose := cmdline.Bool("verbose", false, "Enable verbose debugging mode.")
 	cmdline.Parse(args)
 
-	for _, p := range cmdline.Args() {
-		ext := path.Ext(p)
-		dst := p[:len(p)-len(ext)] + ".enc" + ext
-
-		if *fVerbose {
-			fmt.Println("enc:", p, "->", dst)
-		}
-
-		f, err := os.Open(p)
+	args = cmdline.Args()
+	if len(args) < 1 {
+		err := xformFile(app, cmd, args, xform, os.Stdin, dst)
 		if err != nil {
 			return err
 		}
+	} else {
+		for i, p := range args {
+			if *fVerbose {
+				fmt.Println("enc:", p)
+			}
+			if i > 0 {
+				fmt.Fprintln(dst, "---")
+			}
 
-		var d interface{}
-		err = yaml.NewDecoder(f).Decode(&d)
-		if err != nil {
-			return err
-		}
+			f, err := os.Open(p)
+			if err != nil {
+				return err
+			}
 
-		e, err := encfile(d)
-		if err != nil {
-			return err
-		}
+			defer f.Close()
 
-		r, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE, 0644)
-		if err != nil {
-			return err
-		}
-
-		defer r.Close()
-
-		err = yaml.NewEncoder(r).Encode(e)
-		if err != nil {
-			return err
+			err = xformFile(app, cmd, args, xform, f, dst)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func encfile(src interface{}) (interface{}, error) {
-	return encvalue(reflect.ValueOf(src))
+func xformFile(app, cmd string, args []string, xform transformer, src io.Reader, dst io.Writer) error {
+	var values interface{}
+
+	err := yaml.NewDecoder(src).Decode(&values)
+	if err != nil {
+		return err
+	}
+
+	encoded, err := procFile(xform, values)
+	if err != nil {
+		return err
+	}
+
+	err = yaml.NewEncoder(dst).Encode(encoded)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func encvalue(src reflect.Value) (interface{}, error) {
+func procFile(xform transformer, src interface{}) (interface{}, error) {
+	return procValue(xform, reflect.ValueOf(src))
+}
+
+func procValue(xform transformer, src reflect.Value) (interface{}, error) {
 	src = reflect.Indirect(src)
 	switch k := src.Kind(); k {
 	case reflect.Interface:
-		return encvalue(reflect.ValueOf(src.Interface()))
+		return procValue(xform, reflect.ValueOf(src.Interface()))
 	case reflect.Bool:
-		return base64enc(fmt.Sprint(src.Bool())), nil
+		return xform(fmt.Sprint(src.Bool()))
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return base64enc(fmt.Sprint(src.Int())), nil
+		return xform(fmt.Sprint(src.Int()))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return base64enc(fmt.Sprint(src.Uint())), nil
+		return xform(fmt.Sprint(src.Uint()))
 	case reflect.Float32, reflect.Float64:
-		return base64enc(fmt.Sprint(src.Float())), nil
+		return xform(fmt.Sprint(src.Float()))
 	case reflect.String:
-		return base64enc(src.String()), nil
+		return xform(src.String())
 	case reflect.Array, reflect.Slice:
 		v := make([]interface{}, src.Len())
 		for i := 0; i < src.Len(); i++ {
-			e, err := encvalue(src.Index(i))
+			e, err := procValue(xform, src.Index(i))
 			if err != nil {
 				return nil, err
 			}
@@ -109,7 +127,7 @@ func encvalue(src reflect.Value) (interface{}, error) {
 		r := src.MapRange()
 		for r.Next() {
 			k := reflect.Indirect(r.Key())
-			e, err := encvalue(r.Value())
+			e, err := procValue(xform, r.Value())
 			if err != nil {
 				return nil, err
 			}
@@ -121,6 +139,14 @@ func encvalue(src reflect.Value) (interface{}, error) {
 	}
 }
 
-func base64enc(s string) string {
-	return base64.StdEncoding.EncodeToString([]byte(s))
+func base64enc(s string) (string, error) {
+	return base64.StdEncoding.EncodeToString([]byte(s)), nil
+}
+
+func base64dec(s string) (string, error) {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
