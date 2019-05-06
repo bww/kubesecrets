@@ -47,12 +47,11 @@ func runCmd(app, cmd string, args []string, xform transformer, dst io.Writer) er
 			return err
 		}
 	} else {
-		for i, p := range args {
-			if *fVerbose {
+		for _, p := range args {
+			if len(args) > 1 {
+				fmt.Fprintf(dst, "-----\n%s\n-----\n", p)
+			} else if *fVerbose {
 				fmt.Println("enc:", p)
-			}
-			if i > 0 {
-				fmt.Fprintln(dst, "---")
 			}
 
 			f, err := os.Open(p)
