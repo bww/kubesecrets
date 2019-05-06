@@ -4,7 +4,7 @@ Kubesecrets will read an input Helm values YAML file, traverse its values, trans
 
 Currently the only supported transformations are encoding and decoding leaf / scalar values (`bool`, `int`, `float`, `string`) to and from base64. Non-string types are first stringified before they are encoded. This allows you to manage your secrets in plain text and easily encode them as Kubernetes expects.
 
-The output is written to standard output. If multiple inputs are specified, they are separated by `\n---\n` in the ouput. If no input files are specified, input is read from standard in.
+The output is written to standard output. If multiple inputs are specified, they are separated by `---` on its own line in the ouput. If no input files are specified, input is read from standard in.
 
 ## Installing Kubesecrets
 
